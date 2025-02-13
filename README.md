@@ -6,7 +6,7 @@
 - Kusto Query Language (KQL)
 - VPN Client Software
 
-## Scenario(https://github.com/jameslittle05/ThreatHunts/blob/main/Scenario.md)
+## [Scenario](https://github.com/jameslittle05/ThreatHunts/blob/main/Scenario.md)
 
 Management suspects that some employees may be using unauthorized VPN clients to bypass network security controls. Recent network logs show unusual encrypted traffic patterns and connections to known VPN servers. Additionally, there have been anonymous reports of employees discussing ways to access restricted sites during work hours. The goal is to detect any unauthorized VPN usage and analyze related security incidents to mitigate potential risks. If any unauthorized VPN use is found, notify management.
 
