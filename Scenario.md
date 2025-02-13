@@ -74,8 +74,8 @@ DeviceFileEvents
 ---
 
 ## Created By:
-- **Author Name**: Your Name
-- **Author Contact**: Your Contact Info
+- **Author Name**: James Little
+- **Author Contact**: 
 - **Date**: February 12, 2025
 
 ## Validated By:
@@ -95,5 +95,5 @@ DeviceFileEvents
 
 | **Version** | **Changes**                   | **Date**         | **Modified By**   |
 |-------------|-------------------------------|------------------|-------------------|
-| 1.0         | Initial draft                  | `February 12, 2025` | `Your Name`    |
+| 1.0         | Initial draft                  | `February 12, 2025` | `James Little`    |
 
