@@ -1,142 +1,102 @@
-# Threat Hunt Report: Malicious PowerShell Execution
+# Threat Hunt Report: Unauthorized VPN Usage
 
-## Scenario Creation
-
-### Platforms and Languages Leveraged
-- **Windows 10 Virtual Machines (Microsoft Azure)**
-- **EDR Platform:** Microsoft Defender for Endpoint
-- **Kusto Query Language (KQL)**
-- **PowerShell**
+## Platforms and Languages Leveraged
+- Windows 10 Virtual Machines (Microsoft Azure)
+- EDR Platform: Microsoft Defender for Endpoint
+- Kusto Query Language (KQL)
+- VPN Client Software
 
 ## Scenario
 
-Management has reported unusual system behavior, including unauthorized script execution, high CPU usage, and suspicious outbound network traffic. Network logs indicate multiple outbound connections to suspicious domains, suggesting possible malware execution. Additionally, system administrators have detected unauthorized scheduled tasks running PowerShell scripts at startup. The objective is to detect any unauthorized PowerShell execution, analyze related security incidents, and mitigate potential risks. If malicious PowerShell activity is found, management will be notified.
+Management suspects that some employees may be using unauthorized VPN clients to bypass network security controls. Recent network logs show unusual encrypted traffic patterns and connections to known VPN servers. Additionally, there have been anonymous reports of employees discussing ways to access restricted sites during work hours. The goal is to detect any unauthorized VPN usage and analyze related security incidents to mitigate potential risks. If any unauthorized VPN use is found, notify management.
 
-## High-Level Malicious PowerShell Execution IoC Discovery Plan
+### High-Level VPN-Related IoC Discovery Plan
 
-- Check **DeviceFileEvents** for any PowerShell script (.ps1) downloads or executions.
-- Check **DeviceProcessEvents** for any PowerShell executions using obfuscation or bypass techniques.
-- Check **DeviceNetworkEvents** for any external connections initiated by PowerShell.
-- Check **DeviceRegistryEvents** and **DeviceScheduledTaskEvents** for persistence mechanisms.
+- **Check `DeviceFileEvents`** for any VPN client installation files.
+- **Check `DeviceProcessEvents`** for any signs of VPN client execution.
+- **Check `DeviceNetworkEvents`** for any signs of outgoing connections to known VPN servers or ports.
+
+---
 
 ## Steps Taken
 
-### 1. Searched the DeviceFileEvents Table
+### 1. Searched the `DeviceFileEvents` Table
 
-Searched for any file events involving PowerShell scripts. Discovered that user "employee" downloaded a PowerShell script named `malware.ps1` from an external source to `C:\Users\Public\malware.ps1` at `2024-11-08T22:14:48.6065231Z`.
+Searched for any file that had the string "vpn" in it and discovered what looks like the user "employee" downloaded a VPN client installer, did something that resulted in many VPN-related files being copied to the desktop, and the creation of a file called `vpn-config.txt` on the desktop at `2024-11-08T22:27:19.7259964Z`. These events began at `2024-11-08T22:14:48.6065231Z`.
 
-#### Query used to locate events:
+**Query used to locate events:**
+
 ```kql
 DeviceFileEvents  
 | where DeviceName == "threat-hunt-lab"  
-| where FileName endswith ".ps1"  
-| where FolderPath contains "Users\\Public"  
+| where InitiatingProcessAccountName == "employee"  
+| where FileName contains "vpn"  
+| where Timestamp >= datetime(2024-11-08T22:14:48.6065231Z)  
+| order by Timestamp desc  
 | project Timestamp, DeviceName, ActionType, FileName, FolderPath, SHA256, Account = InitiatingProcessAccountName
 ```
 
 ---
 
-### 2. Searched the DeviceProcessEvents Table
+### 2. Searched the `DeviceProcessEvents` Table
 
-Searched for PowerShell execution using `ExecutionPolicy Bypass` and `NoProfile` flags. Found that at `2024-11-08T22:16:47.4484567Z`, user "employee" executed the malicious script in hidden mode.
+Searched for any `ProcessCommandLine` that contained the string "vpn-client-setup.exe". Based on the logs returned, at `2024-11-08T22:16:47.4484567Z`, an employee on the "threat-hunt-lab" device ran the file `vpn-client-setup.exe` from their Downloads folder, using a command that triggered a silent installation.
 
-#### Query used to locate events:
+**Query used to locate event:**
+
 ```kql
 DeviceProcessEvents  
 | where DeviceName == "threat-hunt-lab"  
-| where ProcessCommandLine has_any ("powershell.exe -ExecutionPolicy Bypass", "powershell.exe -NoProfile", "powershell.exe -WindowStyle Hidden")  
-| project Timestamp, DeviceName, AccountName, ActionType, ProcessCommandLine
+| where ProcessCommandLine contains "vpn-client-setup.exe"  
+| project Timestamp, DeviceName, AccountName, ActionType, FileName, FolderPath, SHA256, ProcessCommandLine
 ```
 
 ---
 
-### 3. Searched the DeviceProcessEvents Table for Persistence Mechanisms
+### 3. Searched the `DeviceProcessEvents` Table for VPN Client Execution
 
-Checked for scheduled tasks created to persist PowerShell execution. Found that at `2024-11-08T22:17:21.6357935Z`, a task named `SystemUpdate` was created to execute the PowerShell script at login.
+Searched for any indication that user "employee" actually opened the VPN client. There was evidence that they did open it at `2024-11-08T22:17:21.6357935Z`. There were several other instances of `vpnclient.exe` as well as related background processes spawned afterward.
 
-#### Query used to locate events:
+**Query used to locate events:**
+
 ```kql
 DeviceProcessEvents  
 | where DeviceName == "threat-hunt-lab"  
-| where ProcessCommandLine contains "schtasks /create"  
-| where ProcessCommandLine contains "powershell.exe"  
-| project Timestamp, DeviceName, AccountName, ActionType, ProcessCommandLine
+| where FileName has_any ("vpnclient.exe", "openvpn.exe", "nordvpn.exe")  
+| project Timestamp, DeviceName, AccountName, ActionType, FileName, FolderPath, SHA256, ProcessCommandLine  
+| order by Timestamp desc
 ```
 
 ---
 
-### 4. Searched the DeviceNetworkEvents Table for Malicious Network Connections
+### 4. Searched the `DeviceNetworkEvents` Table for VPN Network Connections
 
-Identified that at `2024-11-08T22:18:01.1246358Z`, PowerShell initiated a connection to a known malicious C2 server at IP `176.198.159.33`.
+Searched for any indication the VPN client was used to establish a connection using any of the known VPN ports. At `2024-11-08T22:18:01.1246358Z`, an employee on the "threat-hunt-lab" device successfully established a connection to the remote IP address `198.51.100.33` on port `1194`. The connection was initiated by the process `vpnclient.exe`, located in the folder `c:\users\employee\desktop\vpn\vpnclient.exe`.
 
-#### Query used to locate events:
+**Query used to locate events:**
+
 ```kql
 DeviceNetworkEvents  
 | where DeviceName == "threat-hunt-lab"  
-| where InitiatingProcessFileName == "powershell.exe"  
-| where RemoteUrl contains "malicious-c2.com"  
-| project Timestamp, DeviceName, InitiatingProcessAccountName, RemoteIP, RemotePort, RemoteUrl
+| where InitiatingProcessAccountName != "system"  
+| where InitiatingProcessFileName in ("vpnclient.exe", "openvpn.exe", "nordvpn.exe")  
+| where RemotePort in ("1194", "443", "500", "4500")  
+| project Timestamp, DeviceName, InitiatingProcessAccountName, ActionType, RemoteIP, RemotePort, RemoteUrl, InitiatingProcessFileName, InitiatingProcessFolderPath  
+| order by Timestamp desc
 ```
-
----
-
-## Chronological Event Timeline
-
-### 1. File Download - Malicious PowerShell Script
-- **Timestamp:** `2024-11-08T22:14:48.6065231Z`
-- **Event:** User "employee" downloaded `malware.ps1`.
-- **Action:** File download detected.
-- **File Path:** `C:\Users\Public\malware.ps1`
-
-### 2. Process Execution - Malicious PowerShell Execution
-- **Timestamp:** `2024-11-08T22:16:47.4484567Z`
-- **Event:** User executed `malware.ps1` with bypass policies.
-- **Action:** Process execution detected.
-- **Command:** `powershell.exe -ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden -File "C:\Users\Public\malware.ps1"`
-
-### 3. Persistence Mechanism - Scheduled Task Creation
-- **Timestamp:** `2024-11-08T22:17:21.6357935Z`
-- **Event:** Scheduled task `SystemUpdate` created to persist PowerShell execution.
-- **Action:** Persistence method detected.
-- **Command:** `schtasks /create /tn "SystemUpdate" /tr "powershell.exe -ExecutionPolicy Bypass -File C:\Users\Public\malware.ps1" /sc onlogon /rl highest`
-
-### 4. Network Connection - Malicious C2 Communication
-- **Timestamp:** `2024-11-08T22:18:01.1246358Z`
-- **Event:** Connection to C2 server `176.198.159.33`.
-- **Action:** Outbound network connection detected.
-- **Process:** `powershell.exe`
-- **File Path:** `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
 
 ---
 
 ## Summary
 
-User "employee" on the device "threat-hunt-lab" downloaded and executed a malicious PowerShell script that established persistence using scheduled tasks. The script connected to an external Command and Control (C2) server, indicating potential malicious intent. The execution of PowerShell with bypass flags and the creation of unauthorized scheduled tasks are strong indicators of an attack.
+The user "employee" on the "threat-hunt-lab" device initiated and completed the installation of an unauthorized VPN client. They proceeded to launch the client, establish connections within the VPN network, and created various files related to VPN on their desktop, including a file named `vpn-config.txt`. This sequence of activities indicates that the user actively installed, configured, and used the VPN client, likely to bypass security controls and browse anonymously.
 
 ---
 
 ## Response Taken
-- Confirmed unauthorized PowerShell execution.
-- Isolated the compromised device.
-- Blocked outbound connections to known malicious C2 servers.
-- Notified management and security operations for further investigation.
+
+Unauthorized VPN usage was confirmed on the endpoint `threat-hunt-lab` by the user `employee`. The device was isolated, and the user's direct manager was notified.
 
 ---
 
-## Created By:
-- **Author Name**: James Little
-- **Author Contact**: [Your Contact Info]
-- **Date**: February 12, 2025
-
-## Validated By:
-- **Reviewer Name**:
-- **Reviewer Contact**:
-- **Validation Date**:
-
----
-
-## Revision History:
-| **Version** | **Changes** | **Date** | **Modified By** |
-|------------|------------|----------|----------------|
-| 1.0 | Initial draft | `February 12, 2025` | `James Little` |
 
